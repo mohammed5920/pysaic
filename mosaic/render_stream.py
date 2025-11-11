@@ -19,7 +19,7 @@ import mosaic.tiles
 import mosaic.tiles_funcs
 import util.misc
 
-STAGES = ["Chilling", "Safe", "Troubling", "Critical", "lmao"]
+STAGES = ["Not Active", "Safe", "Troubling", "Critical", "Failure"]
 
 class TileStore:
     """data structure that stores the tiles streamed in, as well as metadata for all the tiles

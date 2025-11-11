@@ -5,9 +5,9 @@ import threading
 
 def crash_handler(*exc_info):
     exc_info = "".join(traceback.format_exception(*exc_info))
-    log("app crashed (lmao)\n")
+    log("app crashed\n")
     log(exc_info)
-    pygame.display.message_box(title="uhhhhhhhhhhhhh", message=f"I just downvoted your comment.\n\nFAQ:\n\nWhat does this mean?\n\n{exc_info}", message_type="error")
+    pygame.display.message_box(title="app crashed", message=f"stack trace saved to assets/log.txt\n\n{exc_info}", message_type="error")
 
 class Logging:
     """very simple hack to get messages to print to console and to a file at the same time, 
