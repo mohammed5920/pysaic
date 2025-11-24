@@ -3,6 +3,7 @@ import time
 
 import numpy as np
 import pygame
+import pygame.surfarray
 
 from pysaic import PySaic
 import mosaic.render_funcs
@@ -18,6 +19,7 @@ class Renderer(ui.base.Component):
         super().__init__(ui_instance, **kwargs)
         #component initialision 
         self.frame_pos = 0
+        self.ignored = 0
         self.sm = mosaic.render_stream.StreamingManager()
 
         #read only references to the main mosaic
@@ -150,7 +152,6 @@ class Renderer(ui.base.Component):
             self.lf_delay = 0
                 
         # ----------------------------------------------------------------------- zooming and mouse movement
-        buffer = pygame.Surface(np.multiply(res, self.tile_size)) 
         #correct for zooming in, base offset - no. of tiles being rendered / 2
         x_off = self.x_offset - res[0] / 2
         y_off = self.y_offset - res[1] / 2
@@ -174,34 +175,47 @@ class Renderer(ui.base.Component):
             int(by_off) : int(by_off)+res[1],
             int(bx_off) : int(bx_off)+res[0]
         ]
+        render_surf = pygame.Surface(np.multiply(res, self.tile_size)) 
+        render_arr = pygame.surfarray.pixels3d(render_surf)
         with self.sm.get_store(self.tile_size) as tile_store:
-            render = mosaic.render_funcs.draw(int(bx_off), res[0], int(by_off), res[1], PySaic.mosaic.tile_map, 
+            mosaic.render_funcs.draw(int(bx_off), res[0], int(by_off), res[1], PySaic.mosaic.tile_map, 
                         tile_store.raw, self.pm_arr, self.tile_size, #pass in pm_arr instead of pm_arr_cropped for an extra layer of bounds checking
                         PySaic.mosaic.mode == "hyb", self.frame_pos, 
-                        PySaic.mosaic.tile_len_map, self.sm.bg_thread.is_alive() and not self.sm.iterating)
+                        PySaic.mosaic.tile_len_map, self.sm.bg_thread.is_alive() and not self.sm.iterating, render_arr)
         debug.append(f"Render time: {(time.perf_counter() - start)*1000:.2f}")
 
         #adjust for subtile movement
+        start = time.perf_counter()
+        del render_arr
+        render_surf.unlock() #GC seems to be too slow so we take the risk and unlock manually
         if self.tile_size > 1:
             os_x = int(bx_off%1*self.tile_size)
             os_y = int(by_off%1*self.tile_size)
-            render = render[os_x : os_x + (res[0]-overscan)*self.tile_size, os_y : os_y + (res[1]-overscan)*self.tile_size]
+            final_surf = render_surf.subsurface((os_x, os_y, (res[0]-overscan)*self.tile_size, (res[1]-overscan)*self.tile_size))
             debug.append(f"Overscan x/y: {os_x}/{os_y}")
-
-        #convert to pygame surface and scale up raw tile render to interpolated zoom size
-        start = time.perf_counter()
-        pygame.surfarray.array_to_surface(buffer, render)
-        debug.append(f"Arr -> surf: {(time.perf_counter() - start)*1000:.2f}")
+        else:
+            final_surf = render_surf
+        debug.append(f"Arr -> overscanned surf: {(time.perf_counter() - start)*1000:.2f}")
         
         start = time.perf_counter()
         if self.zoom:
-            scaled = pygame.transform.scale_by(buffer, (1+(self.zoom/self.zoom_steps))) 
+            scaled = pygame.transform.scale_by(final_surf, (1+(self.zoom/self.zoom_steps))) 
             result.blit(scaled, np.divide(np.subtract(result.size, scaled.size), 2))
             debug.append(f"Scaled res: {scaled.size}")
         else:
-            result.blit(buffer, np.divide(np.subtract(result.size, buffer.size), 2))
+            try:
+                result.blit(final_surf, np.divide(np.subtract(result.size, final_surf.size), 2))
+            except pygame.error: 
+                #for some reason, pygame will complain that the surface is still locked even after explicitly unlocking it
+                #this will only ever happen on the first ever frame the renderer draws
+                #it will work perfectly fine after that
+                #so let's just ignore it 🤫
+                if self.ignored:    
+                    print("Ignoring too many frames, something has gone wrong with the locking!")
+                self.ignored += 1 
+                
         #result.blit(pygame.transform.grayscale(buffer), np.divide((self.size[0] - buffer.get_width(), self.size[1] - buffer.get_height()), 2)) #debug
-        debug.append(f"Buffer res: {buffer.size}")
+        debug.append(f"Buffer res: {final_surf.size}")
         debug.append(f"Scale time: {(time.perf_counter() - start)*1000:.2f}")
         self.last_frame = result
 

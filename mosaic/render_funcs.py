@@ -7,7 +7,7 @@ import os
 def draw(x_start : int, x_len : int, y_start : int, y_len : int, 
         tile_map : np.ndarray, tile_store : dict | np.ndarray, match_arr : np.ndarray, tile_size : int,
         is_hybrid : bool, frame_pos : int, end_frame_map : np.ndarray,
-        st_flag : bool):
+        st_flag : bool, render_array : np.ndarray):
     """dispatch the correct render func to use according to y_len, is_hybrid, the type of tile_store, and st_flag \n
     input: \n
         x_start, y_start: which x/y index to start drawing the mosaic from
@@ -29,21 +29,21 @@ def draw(x_start : int, x_len : int, y_start : int, y_len : int,
     mask = is_fast*100 + is_hybrid*10 + is_st #fast/hybrid/st
     match mask:
         case 0: 
-            return draw_smart_static(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size)
+            return draw_smart_static(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, render_array)
         case 1:
-            return draw_smart_static_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size)
+            return draw_smart_static_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, render_array)
         case 10:
-            return draw_smart_hybrid(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map)
+            return draw_smart_hybrid(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map, render_array)
         case 11:
-            return draw_smart_hybrid_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map)
+            return draw_smart_hybrid_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map, render_array)
         case 100:
-            return draw_fast_static(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size)
+            return draw_fast_static(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, render_array)
         case 101:
-            return draw_fast_static_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size)
+            return draw_fast_static_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, render_array)
         case 110:
-            return draw_fast_hybrid(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map)
+            return draw_fast_hybrid(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map, render_array)
         case 111:
-            return draw_fast_hybrid_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map)
+            return draw_fast_hybrid_st(x_start, x_len, y_start, y_len, tile_map, tile_store, match_arr, tile_size, frame_pos, end_frame_map, render_array)
 
 @numba.jit(nopython=True, nogil=True, parallel=True, cache=True)
 def debug_streaming(match_arr : np.ndarray, finished_streaming : np.ndarray, max_size : int):
@@ -72,9 +72,7 @@ def unique_nogil(array):
 
 @numba.jit(nopython=True, nogil=True, parallel=True, cache=True) #base function
 def draw_fast_static(x_start : int, x_len : int, y_start : int, y_len : int,
-            tile_map : np.ndarray, tile_store : np.ndarray, match_list : np.ndarray, tile_size : int):
-
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8) 
+            tile_map : np.ndarray, tile_store : np.ndarray, match_list : np.ndarray, tile_size : int, render_array: np.ndarray):
 
     #bounds checking because any error here leads to a silent crash that's a nightmare to debug
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
@@ -82,10 +80,8 @@ def draw_fast_static(x_start : int, x_len : int, y_start : int, y_len : int,
 
             match_id = match_list[y, x] 
             mapped_id = tile_map[match_id] #map from tile_idx stored in match_list to mapped_id stored in tile_store (saves committed ram)
-            mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
-                    (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile_store[mapped_id]
-
-    return mosaic   
+            render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+                    (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile_store[mapped_id]   
 
 #differences in the rest of the functions:
 #smart -> uses a dict instead of an array for tile_store (becomes tile_dict)
@@ -94,93 +90,87 @@ def draw_fast_static(x_start : int, x_len : int, y_start : int, y_len : int,
 
 @numba.jit(nopython=True, nogil=True, parallel=True, cache=True)
 def draw_smart_static(x_start : int, x_len : int, y_start : int, y_len : int,
-            tile_map : np.ndarray, tile_dict : dict, match_list : np.ndarray, tile_size : int): #<- difference here
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8)
+            tile_map : np.ndarray, tile_dict : dict, match_list : np.ndarray, tile_size : int, render_array: np.ndarray): #<- difference here
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
         for x in range(max(x_start, 0), min(x_start+x_len, match_list.shape[1])):
             match_id = match_list[y, x]
             mapped_id = tile_map[match_id]
             tile = tile_dict.get(mapped_id) #<- and here
             if tile is not None: #<- and here
-                mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+                render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
                         (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile #<- and here
-    return mosaic   
+
 @numba.jit(nopython=True, nogil=True, parallel=True, cache=True)
 def draw_fast_hybrid(x_start : int, x_len : int, y_start : int, y_len : int,
             tile_map : np.ndarray, tile_store : np.ndarray, match_list : np.ndarray, tile_size : int,
-            frame_pos : int, end_frame_map : np.ndarray): #<- difference here
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8)
+            frame_pos : int, end_frame_map : np.ndarray, render_array : np.ndarray): #<- difference here
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
         for x in range(max(x_start, 0), min(x_start+x_len, match_list.shape[1])):
             match_id = match_list[y, x]
             mapped_id = tile_map[match_id] + frame_pos%end_frame_map[match_id] #<- and here
-            mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+            render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
                     (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile_store[mapped_id]
-    return mosaic
+            
 @numba.jit(nopython=True, nogil=True, parallel=True, cache=True)
 def draw_smart_hybrid(x_start : int, x_len : int, y_start : int, y_len : int,
             tile_map : np.ndarray, tile_dict : dict, match_list : np.ndarray, tile_size : int, #<- difference here
-            frame_pos : int, end_frame_map : np.ndarray): #<- and here
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8)
+            frame_pos : int, end_frame_map : np.ndarray, render_array : np.ndarray): #<- and here
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
         for x in range(max(x_start, 0), min(x_start+x_len, match_list.shape[1])):
             match_id = match_list[y, x]
             mapped_id = tile_map[match_id] + frame_pos%end_frame_map[match_id] #<- and here
             tile = tile_dict.get(mapped_id) #<- and here
             if tile is not None: #<- and here
-                mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+                render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
                         (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile #<- and here
-    return mosaic
 
 #single threaded versions (identical apart from decorators)
 
-@numba.jit(nopython=True, nogil=True, cache=True) #<- difference here
+@numba.jit(nopython=True, nogil=True, cache=True) #base function
 def draw_fast_static_st(x_start : int, x_len : int, y_start : int, y_len : int,
-            tile_map : np.ndarray, tile_store : np.ndarray, match_list : np.ndarray, tile_size : int):
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8)
+            tile_map : np.ndarray, tile_store : np.ndarray, match_list : np.ndarray, tile_size : int, render_array: np.ndarray):
+
+    #bounds checking because any error here leads to a silent crash that's a nightmare to debug
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
         for x in range(max(x_start, 0), min(x_start+x_len, match_list.shape[1])):
-            match_id = match_list[y, x]
-            mapped_id = tile_map[match_id]
-            mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
-                    (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile_store[mapped_id]
-    return mosaic   
-@numba.jit(nopython=True, nogil=True, cache=True) #<- difference here
+
+            match_id = match_list[y, x] 
+            mapped_id = tile_map[match_id] #map from tile_idx stored in match_list to mapped_id stored in tile_store (saves committed ram)
+            render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+                    (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile_store[mapped_id]   
+
+@numba.jit(nopython=True, nogil=True, cache=True)
 def draw_smart_static_st(x_start : int, x_len : int, y_start : int, y_len : int,
-            tile_map : np.ndarray, tile_dict : dict, match_list : np.ndarray, tile_size : int): #<- and here
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8)
+            tile_map : np.ndarray, tile_dict : dict, match_list : np.ndarray, tile_size : int, render_array: np.ndarray): #<- difference here
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
         for x in range(max(x_start, 0), min(x_start+x_len, match_list.shape[1])):
             match_id = match_list[y, x]
             mapped_id = tile_map[match_id]
             tile = tile_dict.get(mapped_id) #<- and here
             if tile is not None: #<- and here
-                mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+                render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
                         (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile #<- and here
-    return mosaic   
-@numba.jit(nopython=True, nogil=True, cache=True) #<- difference here
+
+@numba.jit(nopython=True, nogil=True, cache=True)
 def draw_fast_hybrid_st(x_start : int, x_len : int, y_start : int, y_len : int,
             tile_map : np.ndarray, tile_store : np.ndarray, match_list : np.ndarray, tile_size : int,
-            frame_pos : int, end_frame_map : np.ndarray): #<- and here
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8)
+            frame_pos : int, end_frame_map : np.ndarray, render_array : np.ndarray): #<- difference here
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
         for x in range(max(x_start, 0), min(x_start+x_len, match_list.shape[1])):
             match_id = match_list[y, x]
             mapped_id = tile_map[match_id] + frame_pos%end_frame_map[match_id] #<- and here
-            mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+            render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
                     (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile_store[mapped_id]
-    return mosaic
-@numba.jit(nopython=True, nogil=True, cache=True) #<- difference here
+            
+@numba.jit(nopython=True, nogil=True, cache=True)
 def draw_smart_hybrid_st(x_start : int, x_len : int, y_start : int, y_len : int,
-            tile_map : np.ndarray, tile_dict : dict, match_list : np.ndarray, tile_size : int, #<- and here
-            frame_pos : int, end_frame_map : np.ndarray): #<- and here
-    mosaic = np.zeros((x_len*tile_size, y_len*tile_size, 3), dtype=np.uint8)
+            tile_map : np.ndarray, tile_dict : dict, match_list : np.ndarray, tile_size : int, #<- difference here
+            frame_pos : int, end_frame_map : np.ndarray, render_array : np.ndarray): #<- and here
     for y in numba.prange(max(y_start, 0), min(y_start+y_len, match_list.shape[0])):
         for x in range(max(x_start, 0), min(x_start+x_len, match_list.shape[1])):
             match_id = match_list[y, x]
             mapped_id = tile_map[match_id] + frame_pos%end_frame_map[match_id] #<- and here
             tile = tile_dict.get(mapped_id) #<- and here
             if tile is not None: #<- and here
-                mosaic[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
+                render_array[(x-x_start) * tile_size:(x-x_start + 1) * tile_size,
                         (y-y_start) * tile_size:(y-y_start + 1) * tile_size] = tile #<- and here
-    return mosaic

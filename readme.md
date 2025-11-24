@@ -13,9 +13,9 @@ It supports generating mosaics from both images and videos, using any combinatio
 ## Performance
 On a Ryzen 5 5600, using the entirety of [Parks & Recreation](https://en.wikipedia.org/wiki/Parks_and_Recreation) as the tileset:
 - Image mosaics are generated instantly
-- 1080p image/hybrid mosaics are rendered at 60-100fps (depending on zoom level) 
+- 1080p image/hybrid mosaics are rendered at 100-150fps (depending on zoom level) 
 - 1080p videos are converted to mosaics at roughly 40fps
-- RAM usage scales from around 100MB for the UI + rendering a 1080p image mosaic -> 1GB to stream 1080p video into a video mosaic -> around 8GB to comfortably zoom in and view a 1080p hybrid mosaic (lower is possible but increases CPU load)
+- RAM usage scales from around 100MB for the UI + rendering a 1080p image mosaic -> 1GB to stream 1080p video into a video mosaic -> around 4GB to comfortably zoom in and view a 1080p hybrid mosaic (lower is possible but increases CPU load)
 
 ## Analysis
 Unlike other mosaic generators that work with only images, this script prioritises video support - when videos are used as tiles, the video is scanned end-to-end and analysed to extract distinct cuts (shots, scenery changes, etc). Videos are then stored as a collection of distinct key frames + how long the shot remains at roughly the same colour for. When videos are used as source material, the source video is streamed and analysed ahead of time by n seconds, allowing for real-time playback at a fixed RAM budget. Analysis data for videos is cached to disk for re-use without needed to access the original video at all until streaming time.
@@ -30,6 +30,8 @@ Locking is used liberally here to avoid corrupting Numba's thread-unsafe data st
 So how does it store whole videos in RAM for each pixel at 1000x detail? It doesn't. PySaic implements a predictive layered streaming system modelled after video game tech designed to balance performance, I/O and RAM usage considerations. It can scale down to tens of megabytes for normal usage and maintains full video tile streaming comfortably with around 8GB of RAM budget. Zoom in on a complex hybrid mosaic, and the system will evict least recently used tiles to make space for a full resolution version of the frames requested that are then mip-mapped to fit on screen. This allows for 1 fetch for multiple levels of zoom.
 
 ## Limitations
+- Since a significant amount of the script is written entirely in Numba, it can stutter the first couple of times it's ran, as it compiles all the functions. 
+
 - Python, PyGame & Pillow/OpenCV worked for the original idea I was writing at the time (render a low-res image mosaic to a file) but at a parallelised scale they're not the optimal choice of technology. A rewrite that directly uses FFMPEG & OpenGL would be significantly faster. 
 
 - To save on RAM & CPU, nearest-neighbour downscaling is used in the tile streaming pipeline, which leads to aliasing when zooming between mip levels.
