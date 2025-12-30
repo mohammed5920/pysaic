@@ -32,8 +32,10 @@ So how does it store whole videos in RAM for each pixel at 1000x detail? It does
 ## Limitations
 - Since a significant amount of the script is written entirely in Numba, it can stutter the first couple of times it's ran, as it compiles all the functions. 
 
-- Python, PyGame & Pillow/OpenCV worked for the original idea I was writing at the time (render a low-res image mosaic to a file) but at a parallelised scale they're not the optimal choice of technology. A rewrite that directly uses FFMPEG & OpenGL would be significantly faster. 
+- Python, PyGame & Pillow/OpenCV worked for the original idea I was writing at the time (render a low-res image mosaic to a file), but Python is not the best choice for real-time rendering/streaming. While it works as a proof-of-concept with reasonable performance, a re-write in a language like Rust would be easier to scale and maintain. 
 
 - To save on RAM & CPU, nearest-neighbour downscaling is used in the tile streaming pipeline, which leads to aliasing when zooming between mip levels.
 
 - The UI uses an alpha version of what eventually became [MiniUI](https://github.com/mohammed5920/miniui_public). I'm currently working on MiniUI 2, a declarative, primitive-based composable re-write of the engine that will simplify the UI DX immensely, and allow for complex layouts to be layered on top of the renderer for settings/saving UI.
+
+[Writeup](https://madebymohammed.com/pysaic/)
